@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>අහස්කූරු සහ බඹර චක්කර</title>
+    <style>
+        /* CSS කේතය */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+            /* බොත්තම් පහලින් තියන්න */
+            display: flex;
+            justify-content: center; /* තිරස් අතට මැද */
+            align-items: flex-end;   /* සිරස් අතට පහල */
+            min-height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0; /* Canvas එක Buttons වලට යටින් */
+        }
+
+        /* බොත්තම් ටික තියන container එක */
+        .button-container {
+            padding: 20px;
+            z-index: 1; /* Buttons උඩින් තියන්න */
+            display: flex; /* බොත්තම් දෙක ලගින් ලග තියන්න */
+            gap: 15px; /* බොත්තම් අතර ඉඩක් */
+        }
+
+        /* පොදු බොත්තම් style */
+        .actionButton {
+            padding: 12px 25px;
+            font-size: 16px;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+
+        .actionButton:active {
+             transform: scale(0.95); /* Click කරාම පොඩි වෙන effect එකක් */
+        }
+
+        /* අහස්කූරු බොත්තම */
+        #fireworksButton {
+            background-color: #FF4500; /* තැඹිලි */
+        }
+        #fireworksButton:hover {
+            background-color: #FF6347;
+        }
+
+        /* බඹර චක්කර බොත්තම */
+        #spinningWheelButton {
+            background-color: #3498DB; /* නිල් */
+        }
+        #spinningWheelButton:hover {
+            background-color: #5DADE2;
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="mainCanvas"></canvas>
+
+    <div class="button-container">
+        <button id="fireworksButton" class="actionButton">අහස්කූරු පත්තු කරන්න</button>
+        <button id="spinningWheelButton" class="actionButton">බඹර චක්කරය පත්තු කරන්න</button>
+    </div>
+
+    <script>
+        // JavaScript කේතය
+
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const fireworksButton = document.getElementById('fireworksButton');
+        const spinningWheelButton = document.getElementById('spinningWheelButton');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Effects දෙකම තියාගන්න Arrays
+        let fireworks = [];
+        let spinningWheels = [];
+
+        // පාටවල්
+        const fireworkColors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#FFFFFF'];
+        const sparkColors = ['#FFA500', '#FFD700', '#FF8C00', '#FFFFFF', '#FFFACD'];
+
+        // --- Unified Particle Class ---
+        // Effects දෙකටම පාවිච්චි කරන්න පුළුවන් Particle class එකක්
+        class Particle {
+            // Constructor එකට අමතර parameters එකතු කරා
+            constructor(x, y, vx, vy, color, lifespan, options = {}) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.color = color;
+                this.lifespan = lifespan || 100;
+
+                // Default values සහ options වලින් එන අගයන්
+                this.gravity = options.gravity !== undefined ? options.gravity : 0.05;
+                this.size = options.size !== undefined ? options.size : 2;
+                this.drawStyle = options.drawStyle || 'circle'; // 'circle' or 'square'
+                this.damping = options.damping !== undefined ? options.damping : 1.0; // 1.0 = no damping
+
+                this.opacity = 1;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity; // Apply gravity
+
+                // Apply damping (air resistance simulation)
+                this.vx *= this.damping;
+                this.vy *= this.damping;
+
+                this.lifespan--;
+                if (this.lifespan < 0) {
+                    this.opacity -= 0.05; // Fade out
+                }
+            }
+
+            draw() {
+                ctx.globalAlpha = Math.max(0, this.opacity);
+                ctx.fillStyle = this.color;
+                ctx.beginPath(); // හැමතිස්සෙම path එකක් පටන් ගන්න එක හොදයි
+
+                if (this.drawStyle === 'circle') {
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (this.drawStyle === 'square') {
+                    // FillRect එකට path ඕන නෑ, ඒත් උඩින් fill() call කරනවා නම් beginPath() එක උඩ තියෙන එක හොදයි
+                    ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+                }
+                // fill() එක මෙතන තිබ්බොත් දෙකටම වැඩ
+                // ctx.fill(); // හැබැයි fillRect එකට මේක ඕන නෑ. ඒ නිසා උඩ විදිය හොදයි.
+
+                ctx.globalAlpha = 1.0; // Reset alpha
+            }
+        }
+
+        // --- Firework Class (අහස්කූරු) ---
+        class Firework {
+            constructor(startX, startY, endX, endY) {
+                this.x = startX;
+                this.y = startY;
+                this.sx = startX;
+                this.sy = startY;
+                this.tx = endX;
+                this.ty = endY;
+                const dx = endX - startX;
+                const dy = endY - startY;
+                this.distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+                this.distanceTraveled = 0;
+                this.angle = Math.atan2(dy, dx);
+                this.speed = 2.5;
+                this.acceleration = 1.04;
+                this.color = fireworkColors[Math.floor(Math.random() * fireworkColors.length)];
+                this.particles = [];
+                this.exploded = false;
+                this.trailParticles = []; // උඩට යද්දී trail එකක් හදන්න
+            }
+
+            update(index) {
+                // Trail particles update and remove
+                 for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+                    this.trailParticles[i].update();
+                    if (this.trailParticles[i].opacity <= 0) {
+                        this.trailParticles.splice(i, 1);
+                    }
+                }
+
+                if (this.exploded) {
+                    // Explosion particles update and remove
+                    for (let i = this.particles.length - 1; i >= 0; i--) {
+                        this.particles[i].update();
+                        if (this.particles[i].opacity <= 0) {
+                            this.particles.splice(i, 1);
+                        }
+                    }
+                    // If no more particles, remove firework
+                     if (this.particles.length === 0 && this.trailParticles.length === 0) {
+                         fireworks.splice(index, 1);
+                    }
+                } else {
+                     // Add trail particle
+                    if(Math.random() < 0.3) { // හැම frame එකේම නැතුව ටිකක් අඩුවෙන්
+                         const trailOptions = { gravity: 0.02, size: 1.5, drawStyle: 'circle' };
+                        this.trailParticles.push(new Particle(this.x, this.y, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, this.color, 20, trailOptions));
+                    }
+
+                    // Movement towards target
+                    this.vx = Math.cos(this.angle) * this.speed;
+                    this.vy = Math.sin(this.angle) * this.speed;
+                    this.speed *= this.acceleration;
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.distanceTraveled = Math.sqrt((this.x - this.sx)**2 + (this.y - this.sy)**2);
+
+                    // Explode at target
+                    if (this.distanceTraveled >= this.distanceToTarget) {
+                        this.explode();
+                        this.exploded = true;
+                    }
+                }
+            }
+
+             draw() {
+                 // Draw trail particles
+                this.trailParticles.forEach(p => p.draw());
+
+                if (!this.exploded) {
+                    // Draw the rising rocket
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // Draw explosion particles
+                    this.particles.forEach(p => p.draw());
+                }
+            }
+
+            explode() {
+                const particleCount = 100 + Math.random() * 80; // වැඩිපුර particles
+                for (let i = 0; i < particleCount; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    // පිපිරුමේ වේගය, මැද particles හෙමින්, අග particles වේගෙන් (සරලව)
+                    const speedFactor = Math.pow(Math.random(), 0.6);
+                    const speed = speedFactor * (Math.random() * 6 + 2);
+                    const vx = Math.cos(angle) * speed;
+                    const vy = Math.sin(angle) * speed;
+                    const color = this.color; // එකම පාට හෝ වෙනස් වෙන්න පුළුවන්
+                    const lifespan = 60 + Math.random() * 40;
+                    // Particle හදනකොට options දෙන්න
+                    const particleOptions = {
+                        gravity: 0.06, // Firework particles වලට ටිකක් වැඩි gravity
+                        size: Math.random() * 1.5 + 1,
+                        drawStyle: 'circle'
+                    };
+                    this.particles.push(new Particle(this.x, this.y, vx, vy, color, lifespan, particleOptions));
+                }
+            }
+        }
+
+        // --- SpinningWheel Class (බඹර චක්කරය) ---
+        class SpinningWheel {
+             constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 10;
+                this.rotationSpeed = 0.15 + Math.random() * 0.1;
+                this.currentAngle = Math.random() * Math.PI * 2;
+                this.particles = [];
+                this.lifespan = 150 + Math.random() * 100;
+                this.active = true;
+                 // Randomly pick one of the spark colors for the entire wheel
+                this.color = sparkColors[Math.floor(Math.random() * sparkColors.length)];
+                this.emitters = [0, Math.PI]; // Opposing jets
+                this.particleEmitRate = 3;
+                this.particleSpeed = 1.5 + Math.random() * 1;
+            }
+
+            update(index) {
+                 if (!this.active) return;
+
+                if (this.lifespan > 0) {
+                    this.currentAngle += this.rotationSpeed;
+                    this.lifespan--;
+
+                    // Emit particles
+                    this.emitters.forEach(offset => {
+                        const angle = this.currentAngle + offset;
+                        for (let i = 0; i < this.particleEmitRate; i++) {
+                            this.emitParticle(angle);
+                        }
+                    });
+
+                } else if (this.particles.length === 0) {
+                    // Lifespan ended and all particles faded, remove wheel
+                    this.active = false;
+                    spinningWheels.splice(index, 1); // Remove itself from the array
+                    return; // Exit update early
+                }
+
+                 // Update existing particles
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    this.particles[i].update();
+                    if (this.particles[i].opacity <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            emitParticle(angle) {
+                const emitX = this.x + Math.cos(angle) * this.radius;
+                const emitY = this.y + Math.sin(angle) * this.radius;
+
+                const tangentVx = -Math.sin(angle) * this.particleSpeed;
+                const tangentVy = Math.cos(angle) * this.particleSpeed;
+
+                const randomFactor = 0.6; // Spread sparks a bit more
+                const vx = tangentVx + (Math.random() - 0.5) * randomFactor;
+                const vy = tangentVy + (Math.random() - 0.5) * randomFactor;
+
+                const sparkLifespan = 30 + Math.random() * 30;
+                // Particle options for sparks
+                const particleOptions = {
+                    gravity: 0.02, // Less gravity for sparks
+                    size: Math.random() * 2 + 1,
+                    drawStyle: 'square', // Sparks as squares
+                    damping: 0.98 // Add damping for sparks
+                };
+                this.particles.push(new Particle(emitX, emitY, vx, vy, this.color, sparkLifespan, particleOptions));
+            }
+
+             draw() {
+                 // Draw particles
+                this.particles.forEach(particle => particle.draw());
+            }
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            // Clear canvas with a trail effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.12)'; // Trail effect
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // --- Update and Draw Fireworks ---
+            // Loop backwards for safe removal
+            for (let i = fireworks.length - 1; i >= 0; i--) {
+                fireworks[i].update(i); // Pass index for removal
+                // Check if it still exists after update before drawing
+                 if (fireworks[i]) {
+                    fireworks[i].draw();
+                }
+            }
+
+            // --- Update and Draw Spinning Wheels ---
+            // Loop backwards for safe removal
+            for (let i = spinningWheels.length - 1; i >= 0; i--) {
+                spinningWheels[i].update(i); // Pass index for removal
+                // Check if it still exists after update before drawing
+                if (spinningWheels[i]) {
+                     spinningWheels[i].draw();
+                }
+            }
+
+            // Request next frame
+            requestAnimationFrame(animate);
+        }
+
+        // --- Event Listeners for Buttons ---
+
+        // Fireworks Button Listener
+        fireworksButton.addEventListener('click', () => {
+            const startX = canvas.width / 2;
+            const startY = canvas.height;
+            // Random target in the upper part of the screen
+            const endX = canvas.width * 0.15 + Math.random() * canvas.width * 0.7;
+            const endY = canvas.height * 0.1 + Math.random() * canvas.height * 0.4;
+            fireworks.push(new Firework(startX, startY, endX, endY));
+        });
+
+        // Spinning Wheel Button Listener
+        spinningWheelButton.addEventListener('click', () => {
+             // Random position in the middle area of the screen
+            const wheelX = canvas.width * 0.2 + Math.random() * canvas.width * 0.6;
+            const wheelY = canvas.height * 0.4 + Math.random() * canvas.height * 0.4;
+            spinningWheels.push(new SpinningWheel(wheelX, wheelY));
+        });
+
+        // --- Window Resize Handler ---
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // --- Start Animation ---
+        animate();
+
+    </script>
+</body>
+</html>
